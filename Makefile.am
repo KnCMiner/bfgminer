@@ -270,7 +270,11 @@ bfgminer_SOURCES += driver-avalon.c driver-avalon.h hexdump.c
 endif
 
 if USE_KNC
+if HAS_SCRYPT
+bfgminer_SOURCES += driver-knc-titan.c
+else
 bfgminer_SOURCES += driver-knc.c
+endif
 endif
 
 if HAS_KLONDIKE
