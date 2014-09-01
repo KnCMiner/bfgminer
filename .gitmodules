@@ -4,3 +4,6 @@
 [submodule "ccan"]
 	path = ccan-upstream
 	url = git://git.ozlabs.org/~ccan/ccan
+[submodule "uthash"]
+	path = uthash
+	url = git://github.com/troydhanson/uthash
