@@ -7,3 +7,6 @@
 [submodule "uthash"]
 	path = uthash
 	url = git://github.com/troydhanson/uthash
+[submodule "knc-asic"]
+	path = knc-asic
+	url = git@stockholm.kandc.se:projects/kncminer/knc-asic
