@@ -12705,7 +12705,8 @@ begin_bench:
 		cp = current_pool();
 
 		// Generally, each processor needs a new work, and all at once during work restarts
-		max_staged += mining_threads;
+		/* Not true for KnC :) 
+		   max_staged += mining_threads; */
 
 		mutex_lock(stgd_lock);
 		ts = __total_staged();
