@@ -1038,8 +1038,6 @@ void adjust_quota_gcd(void)
 	applog(LOG_DEBUG, "Global quota greatest common denominator set to %lu", gcd);
 }
 
-static void enable_pool(struct pool *);
-
 /* Return value is ignored if not called from add_pool_details */
 struct pool *add_pool(void)
 {
@@ -2764,7 +2762,8 @@ void free_work(struct work *work)
 	free(work);
 }
 
-static const char *workpadding_bin = "\0\0\0\x80\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\x02\0\0";
+const char *bfg_workpadding_bin = "\0\0\0\x80\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x80\x02\0\0";
+#define workpadding_bin  bfg_workpadding_bin
 
 // Must only be called with ch_lock held!
 static
@@ -2954,7 +2953,8 @@ static bool work_decode(struct pool *pool, struct work *work, json_t *val)
 		}
 		work->rolltime = blkmk_time_left(tmpl, tv_now.tv_sec);
 #if BLKMAKER_VERSION > 1
-		if ((!tmpl->cbtxn) && coinbase_script_block_id != current_block_id)
+		const uint32_t tmpl_block_id = ((uint32_t*)tmpl->prevblk)[0];
+		if ((!tmpl->cbtxn) && coinbase_script_block_id != tmpl_block_id)
 			refresh_bitcoind_address(false);
 		if (bytes_len(&opt_coinbase_script))
 		{
@@ -4396,7 +4396,7 @@ void logwin_update(void)
 }
 #endif
 
-static void enable_pool(struct pool *pool)
+void enable_pool(struct pool * const pool)
 {
 	if (pool->enabled != POOL_ENABLED) {
 		mutex_lock(&lp_lock);
@@ -4407,20 +4407,27 @@ static void enable_pool(struct pool *pool)
 	}
 }
 
-#ifdef HAVE_CURSES
-static void disable_pool(struct pool *pool)
+void disable_pool(struct pool * const pool, const enum pool_enable enable_status)
 {
-	if (pool->enabled == POOL_ENABLED)
-		enabled_pools--;
-	pool->enabled = POOL_DISABLED;
-}
-#endif
-
-static void reject_pool(struct pool *pool)
-{
-	if (pool->enabled == POOL_ENABLED)
-		enabled_pools--;
-	pool->enabled = POOL_REJECTING;
+	if (pool->enabled == POOL_DISABLED)
+		/* had been manually disabled before */
+		return;
+	
+	if (pool->enabled != POOL_ENABLED)
+	{
+		/* has been programmatically disabled already, just change to the new status directly */
+		pool->enabled = enable_status;
+		return;
+	}
+	
+	/* Fall into the lock area */
+	mutex_lock(&lp_lock);
+	--enabled_pools;
+	pool->enabled = enable_status;
+	mutex_unlock(&lp_lock);
+	
+	if (pool == current_pool())
+		switch_pools(NULL);
 }
 
 static double share_diff(const struct work *);
@@ -4610,9 +4617,7 @@ share_result(json_t *val, json_t *res, json_t *err, const struct work *work,
 			if (pool->seq_rejects > utility * 3) {
 				applog(LOG_WARNING, "Pool %d rejected %d sequential shares, disabling!",
 				       pool->pool_no, pool->seq_rejects);
-				reject_pool(pool);
-				if (pool == current_pool())
-					switch_pools(NULL);
+				disable_pool(pool, POOL_REJECTING);
 				pool->seq_rejects = 0;
 			}
 		}
@@ -4854,9 +4859,9 @@ static inline struct pool *select_pool(bool lagging)
 	bool avail = false;
 	int tested, i;
 
+retry:
 	cp = current_pool();
 
-retry:
 	if (pool_strategy == POOL_BALANCE) {
 		pool = select_balanced(cp);
 		if (pool_unworkable(pool))
@@ -6415,10 +6420,10 @@ void switch_pools(struct pool *selected)
 	if (pool_unusable(pool) && failover_pool)
 		pool = failover_pool;
 	currentpool = pool;
+	cg_wunlock(&control_lock);
 	mutex_lock(&lp_lock);
 	pthread_cond_broadcast(&lp_cond);
 	mutex_unlock(&lp_lock);
-	cg_wunlock(&control_lock);
 
 	/* Set the lagging flag to avoid pool not providing work fast enough
 	 * messages in failover only mode since  we have to get all fresh work
@@ -6865,6 +6870,8 @@ void remove_pool(struct pool *pool)
 	int i, last_pool = total_pools - 1;
 	struct pool *other;
 
+	disable_pool(pool, POOL_DISABLED);
+	
 	/* Boost priority of any lower prio than this one */
 	for (i = 0; i < total_pools; i++) {
 		other = pools[i];
@@ -7199,7 +7206,8 @@ void zero_stats(void)
 		cgpu->cgminer_stats.getwork_wait_max.tv_usec = 0;
 		mutex_unlock(&hash_lock);
 		
-		cgpu->drv->zero_stats(cgpu);
+		if (cgpu->drv->zero_stats)
+			cgpu->drv->zero_stats(cgpu);
 	}
 }
 
@@ -7294,7 +7302,6 @@ retry:
 			wlogprint("Unable to remove pool due to activity\n");
 			goto retry;
 		}
-		disable_pool(pool);
 		remove_pool(pool);
 		goto updated;
 	} else if (!strncasecmp(&input, "s", 1)) {
@@ -7319,9 +7326,7 @@ retry:
 			goto retry;
 		}
 		pool = pools[selected];
-		disable_pool(pool);
-		if (pool == current_pool())
-			switch_pools(NULL);
+		disable_pool(pool, POOL_DISABLED);
 		goto updated;
 	} else if (!strncasecmp(&input, "e", 1)) {
 		selected = curses_int("Select pool number");
@@ -9034,7 +9039,7 @@ out:
 
 static void pool_resus(struct pool *pool)
 {
-	if (pool_strategy == POOL_FAILOVER && pool->prio < cp_prio())
+	if (pool->enabled == POOL_ENABLED && pool_strategy == POOL_FAILOVER && pool->prio < cp_prio())
 		applog(LOG_WARNING, "Pool %d %s alive, testing stability", pool->pool_no, pool->rpc_url);
 	else
 		applog(LOG_INFO, "Pool %d %s alive", pool->pool_no, pool->rpc_url);
@@ -9494,6 +9499,7 @@ void _submit_work_async(struct work *work)
 		work_check_for_block(work);
 		share_result(jn, jn, jn, work, false, "");
 		free_work(work);
+		json_decref(jn);
 		return;
 	}
 
@@ -9560,7 +9566,7 @@ bool test_hash(const void * const phash, const float diff)
 		// FIXME: > 1 should check more
 		return !hash[7];
 	
-	const uint32_t Htarg = (uint32_t)(1. / diff);
+	const uint32_t Htarg = (uint32_t)ceil((1. / diff) - 1);
 	const uint32_t tmp_hash7 = le32toh(hash[7]);
 	
 	applog(LOG_DEBUG, "htarget %08lx hash %08lx",
@@ -9586,11 +9592,11 @@ enum test_nonce2_result _test_nonce2(struct work *work, uint32_t nonce, bool che
 		if (pool->stratum_active)
 		{
 			// Some stratum pools are buggy and expect difficulty changes to be immediate retroactively, so if the target has changed, check and submit just in case
-			if (memcmp(pool->swork.target, work->target, sizeof(work->target)))
+			if (memcmp(pool->next_target, work->target, sizeof(work->target)))
 			{
 				applog(LOG_DEBUG, "Stratum pool %u target has changed since work job issued, checking that too",
 				       pool->pool_no);
-				if (hash_target_check_v(work->hash, pool->swork.target))
+				if (hash_target_check_v(work->hash, pool->next_target))
 					high_hash = false;
 			}
 		}
@@ -10320,8 +10326,8 @@ static void *watchpool_thread(void __maybe_unused *userdata)
 			/* Only switch pools if the failback pool has been
 			 * alive for more than 5 minutes (default) to prevent
 			 * intermittently failing pools from being used. */
-			if (!pool->idle && pool_strategy == POOL_FAILOVER && pool->prio < cp_prio() &&
-			    now.tv_sec - pool->tv_idle.tv_sec > opt_fail_switch_delay) {
+			if (!pool->idle && pool->enabled == POOL_ENABLED && pool_strategy == POOL_FAILOVER && pool->prio < cp_prio() && now.tv_sec - pool->tv_idle.tv_sec > opt_fail_switch_delay)
+			{
 				if (opt_fail_switch_delay % 60)
 					applog(LOG_WARNING, "Pool %d %s stable for %d second%s",
 					       pool->pool_no, pool->rpc_url,

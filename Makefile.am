@@ -84,6 +84,7 @@ update-version:
 	cmp version.h version.h.new && rm version.h.new || mv version.h.new version.h
 version.h: update-version
 bfgminer_SOURCES += version.h
+BUILT_SOURCES = version.h
 
 SUBDIRS += $(LIBBLKMAKER_SUBDIRS)
 LIBBLKMAKER_SUBDIRS =
@@ -269,6 +270,10 @@ if HAS_AVALON
 bfgminer_SOURCES += driver-avalon.c driver-avalon.h hexdump.c
 endif
 
+if USE_AVALONMM
+bfgminer_SOURCES += driver-avalonmm.c
+endif
+
 if USE_KNC
 if HAS_SCRYPT
 bfgminer_SOURCES += driver-titan.c titan-asic.c knc-asic/knc-asic.c knc-asic/crc32.c knc-asic/knc-spimux.c knc-asic/knc-transport-spimux.c titan-asic.h knc-asic/include/knc-asic.h knc-asic/include/knc-transport.h
@@ -338,6 +343,10 @@ endif
 if USE_JINGTIAN
 bfgminer_SOURCES += driver-aan.c driver-aan.h
 bfgminer_SOURCES += driver-jingtian.c
+endif
+
+if USE_MINERGATE
+bfgminer_SOURCES += driver-minergate.c
 endif
 
 if USE_ROCKMINER

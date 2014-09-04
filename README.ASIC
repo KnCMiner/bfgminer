@@ -6,8 +6,8 @@ Butterfly Labs' SC range of devices, HashBuster boards, Klondike modules, and
 KnCMiner's Mercury, Jupiter and Saturn.
 
 
-AVALON
-------
+AVALON 1
+--------
 
 Currently, Avalon boards are best supported by connecting them directly (or via
 a hub) to a regular PC running BFGMiner. It is also possible to install the
@@ -45,6 +45,26 @@ Sample settings for valid different frequencies (last 2 values):
 45:282
 47:270
 50:256
+
+
+AVALON 2/3
+----------
+
+Avalon 2/3 units communicate with a UART, usually attached to your host via a
+generic USB UART adapter. Therefore, you will need to manually probe the correct
+UART device with the -S option:
+
+-S avalonmm:\\.\COM22
+
+Next, use the --set option to configure at least your desired clock frequency
+and voltage.
+
+Avalon 2: --set avalonmm:clock=1500 --set avalonmm:voltage=1
+Avalon 3: --set avalonmm:clock=450 --set avalonmm:voltage=0.6625
+
+You may also want to set the fan speed, which is specified as a percentage:
+
+--set avalonmm:fan=95
 
 
 BFSB, MEGABIGPOWER, AND METABANK BITFURY BOARDS
@@ -235,6 +255,48 @@ need to workaround bugs in the firmware:
     bfgminer --set bifury:chips=15 --set bifury:free_after_job=no
 If you have different devices using the bifury driver, see the section on
 Hex*Fury for applying workarounds per-device.
+
+
+GRIDSEED
+--------
+
+Gridseed units, at the present time, come in two versions: Blade - a 40 chip
+unit and Orb - a 5 chip unit. Orb units can be used to mine both SHA256d and
+scrypt based coins whereas the Blade is scrypt only, although BFGMiner only
+supports scrypt mode at this time.
+
+BFGMiner allows a miner to connect both types of units to a single miner
+instance and provides for granular control of the clock frequencies for each
+device and each chip on each device. The basic use of this feature is to use the
+--set option on from the command line:
+
+bfgminer --scrypt -S gridseed:all --set gridseed@<serial_number>:clock=825
+
+for multiple devices, add multiple --set arguments.
+
+Additionally, these can be added to the bfgminer.conf file for persistence like
+this:
+
+"set" : [
+        "gridseed@<serial_number>:clock=825",
+        "gridseed@<serial_number>:clock=850",
+        "gridseed@<serial_number>:clock=875"
+]
+
+To find the device serial number, start bfgminer and press <M> to manage
+devices, then <Page Down> or <down arrow> through the list of devices and take
+note of the device serial number in the device information shown.
+
+...
+Select processor to manage using up/down arrow keys
+ GSD 0a:       |  74.4/ 72.9/ 10.2kh/s | A:  1 R:0+0(none) HW:0/none
+  STM32 Virtual COM Port from STMicroelectronics
+Serial: 6D85278F5650
+Clock speed: 875
+...
+
+So for example, an entry would look like this:
+        gridseed@6D85278F5650:clock=875
 
 
 ---
