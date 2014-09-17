@@ -195,7 +195,7 @@ static void knc_detect(void)
 static
 bool knc_spi_open(const char *repr, struct spi_port * const spi)
 {
-	const char * const spipath = "/dev/spidev1.0";
+	const char * const spipath = "/dev/spidev0.0";
 	const int fd = open(spipath, O_RDWR);
 	const uint8_t lsbfirst = 0;
 	if (fd == -1)
