@@ -12711,8 +12711,11 @@ begin_bench:
 		cp = current_pool();
 
 		// Generally, each processor needs a new work, and all at once during work restarts
-		/* Not true for KnC :) 
-		   max_staged += mining_threads; */
+#if ((defined USE_KNC) && (defined CONTROLLER_BOARD_RPI))
+		/* Not true for KnC-on-RPi (Titan) :) */
+#else
+		max_staged += mining_threads;
+#endif /* KnC-on-RPi (Titan) */
 
 		mutex_lock(stgd_lock);
 		ts = __total_staged();
