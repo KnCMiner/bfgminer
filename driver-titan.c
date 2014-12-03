@@ -345,7 +345,7 @@ static bool configure_one_die(struct knc_titan_info *knc, int asic, int die)
 		.nonce_bottom = 0,
 		.nonce_top = 0xFFFFFFFF,
 	};
-	fill_in_thread_params(opt_knc_threads_per_core, &setup_params);
+	fill_in_thread_Nfactor_params(opt_knc_threads_per_core, opt_scrypt_Nfactor, &setup_params);
 
 	repr = die_p->proc->device->dev_repr;
 	bool success = true;

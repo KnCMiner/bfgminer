@@ -173,6 +173,8 @@ int opt_g_threads = -1;
 #endif
 #ifdef USE_SCRYPT
 static char detect_algo = 1;
+/* 10 = scrypt */
+int opt_scrypt_Nfactor = 10;
 #else
 static char detect_algo;
 #endif

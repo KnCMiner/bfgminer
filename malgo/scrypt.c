@@ -409,6 +409,56 @@ static void scrypt_1024_1_1_256_sp(const uint32_t* input, char* scratchpad, uint
 	PBKDF2_SHA256_80_128_32(input, X, ostate);
 }
 
+/* cpu and memory intensive function to transform a 80 byte buffer into a 32 byte output
+   scratchpad size needs to be at least 63 + (128 * r * p) + (256 * r + 64) + (128 * r * N) bytes
+ */
+static void scrypt_N_1_1_256_sp(const uint32_t* input, char* scratchpad, uint32_t *ostate, const uint32_t N)
+{
+	uint32_t * V;
+	uint32_t X[32];
+	uint32_t W[32];
+	uint32_t i;
+	uint32_t j;
+	uint32_t k;
+	uint64_t *p1, *p2;
+
+	p1 = (uint64_t *)X;
+	V = (uint32_t *)(((uintptr_t)(scratchpad) + 63) & ~ (uintptr_t)(63));
+
+	PBKDF2_SHA256_80_128(input, X);
+
+	for (i = 0; i < (N >> 1); ++i) {
+		memcpy(&V[i * 32], X, 128);
+
+		salsa20_8(&X[0], &X[16]);
+		salsa20_8(&X[16], &X[0]);
+
+		salsa20_8(&X[0], &X[16]);
+		salsa20_8(&X[16], &X[0]);
+	}
+
+	for (i = 0; i < N; ++i) {
+		j = (X[16] & (N - 1)) >> 1;
+
+		if (X[16] & 1) {
+			memcpy(W, &V[j * 32], 128);
+			salsa20_8(&W[0], &W[16]);
+			salsa20_8(&W[16], &W[0]);
+			p2 = (uint64_t *)W;
+		} else {
+			p2 = (uint64_t *)(&V[j * 32]);
+		}
+
+		for(k = 0; k < 16; k++)
+			p1[k] ^= p2[k];
+
+		salsa20_8(&X[0], &X[16]);
+		salsa20_8(&X[16], &X[0]);
+	}
+
+	PBKDF2_SHA256_80_128_32(input, X, ostate);
+}
+
 /* 131583 rounded up to 4 byte alignment */
 #define SCRATCHBUF_SIZE	(131584)
 
@@ -498,8 +548,13 @@ void scrypt_hash_data(void * const out_hash, const void * const pdata)
 	char *scratchbuf;
 
 	be32enc_vect(data, pdata, 20);
-	scratchbuf = alloca(SCRATCHBUF_SIZE);
-	scrypt_1024_1_1_256_sp(data, scratchbuf, ohash);
+	if (10 == opt_scrypt_Nfactor) {
+		scratchbuf = alloca(SCRATCHBUF_SIZE);
+		scrypt_1024_1_1_256_sp(data, scratchbuf, ohash);
+	} else {
+		scratchbuf = alloca((1 << (opt_scrypt_Nfactor - 1)) * 128 + 512);
+		scrypt_N_1_1_256_sp(data, scratchbuf, ohash, (1 << opt_scrypt_Nfactor));
+	}
 	swap32tobe(out_hash, ohash, 32/4);
 }
 
