@@ -552,8 +552,14 @@ void scrypt_hash_data(void * const out_hash, const void * const pdata)
 		scratchbuf = alloca(SCRATCHBUF_SIZE);
 		scrypt_1024_1_1_256_sp(data, scratchbuf, ohash);
 	} else {
-		scratchbuf = alloca((1 << (opt_scrypt_Nfactor - 1)) * 128 + 512);
-		scrypt_N_1_1_256_sp(data, scratchbuf, ohash, (1 << opt_scrypt_Nfactor));
+		if (16 >= opt_scrypt_Nfactor) {
+			scratchbuf = alloca((1 << (opt_scrypt_Nfactor - 1)) * 128 + 512);
+			scrypt_N_1_1_256_sp(data, scratchbuf, ohash, (1 << opt_scrypt_Nfactor));
+		} else {
+			scratchbuf = malloc((1 << (opt_scrypt_Nfactor - 1)) * 128 + 512);
+			scrypt_N_1_1_256_sp(data, scratchbuf, ohash, (1 << opt_scrypt_Nfactor));
+			free(scratchbuf);
+		}
 	}
 	swap32tobe(out_hash, ohash, 32/4);
 }
