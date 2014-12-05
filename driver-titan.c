@@ -46,9 +46,9 @@ static inline uint32_t get_diff_filtering_zeroes(uint32_t Nfactor)
 	case 11:
 		return 22;
 	case 12:
-		return 20;
+		return 21;
 	case 13:
-		return 18;
+		return 20;
 	case 14:
 		return 17;
 	case 15:
