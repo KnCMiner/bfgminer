@@ -173,6 +173,8 @@ int opt_g_threads = -1;
 #endif
 #ifdef USE_SCRYPT
 static char detect_algo = 1;
+/* 10 = scrypt */
+int opt_scrypt_Nfactor = 10;
 #else
 static char detect_algo;
 #endif
@@ -2666,6 +2668,9 @@ static struct opt_table opt_config_table[] = {
 	OPT_WITHOUT_ARG("--scrypt",
 	                set_malgo_scrypt, NULL,
 			"Use the scrypt algorithm for mining (non-bitcoin)"),
+	OPT_WITH_ARG("--scrypt-n",
+		     opt_set_intval, opt_show_intval, &opt_scrypt_Nfactor,
+		     "Set scrypt N factor"),
 #endif
 	OPT_WITH_ARG("--set-device|--set",
 			opt_string_elist_add, NULL, &opt_set_device_list,

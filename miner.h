@@ -1012,6 +1012,9 @@ extern char *opt_klondike_options;
 extern bool opt_bfl_noncerange;
 #endif
 extern int swork_id;
+#ifdef USE_SCRYPT
+extern int opt_scrypt_Nfactor;
+#endif
 
 extern pthread_rwlock_t netacc_lock;
 

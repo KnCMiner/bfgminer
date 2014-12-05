@@ -37,8 +37,34 @@
 
 /* Specify here minimum number of leading zeroes in hash */
 #define	DEFAULT_DIFF_FILTERING_ZEROES	24
-#define	DEFAULT_DIFF_FILTERING_FLOAT	(1. / ((double)(0x00000000FFFFFFFF >> DEFAULT_DIFF_FILTERING_ZEROES)))
-#define	DEFAULT_DIFF_HASHES_PER_NONCE	(1 << DEFAULT_DIFF_FILTERING_ZEROES)
+static inline uint32_t get_diff_filtering_zeroes(uint32_t Nfactor)
+{
+	switch (Nfactor) {
+	case 10:
+	default:
+		return DEFAULT_DIFF_FILTERING_ZEROES;
+	case 11:
+		return 22;
+	case 12:
+		return 21;
+	case 13:
+		return 20;
+	case 14:
+		return 17;
+	case 15:
+		return 15;
+	case 16:
+		return 13;
+	case 17:
+		return 11;
+	case 18:
+		return 9;
+	case 19:
+		return 7;
+	}
+}
+#define	DIFF_FILTERING_FLOAT(Nfactor)	(1. / ((double)(0x00000000FFFFFFFF >> get_diff_filtering_zeroes(Nfactor))))
+#define	DIFF_HASHES_PER_NONCE(Nfactor)	(1 << get_diff_filtering_zeroes(Nfactor))
 
 BFG_REGISTER_DRIVER(knc_titan_drv)
 
@@ -336,7 +362,7 @@ static bool configure_one_die(struct knc_titan_info *knc, int asic, int die)
 	struct titan_setup_core_params setup_params = {
 		.bad_address_mask = {0, 0},
 		.bad_address_match = {0x3FF, 0x3FF},
-		.difficulty = DEFAULT_DIFF_FILTERING_ZEROES - 1,
+		.difficulty = get_diff_filtering_zeroes(opt_scrypt_Nfactor) - 1,
 		.thread_enable = 0xFF,
 		.thread_base_address = {0, 1, 2, 3, 4, 5, 6, 7},
 		.lookup_gap_mask = {0x7, 0x7, 0x7, 0x7, 0x7, 0x7, 0x7, 0x7},
@@ -345,7 +371,7 @@ static bool configure_one_die(struct knc_titan_info *knc, int asic, int die)
 		.nonce_bottom = 0,
 		.nonce_top = 0xFFFFFFFF,
 	};
-	fill_in_thread_params(opt_knc_threads_per_core, &setup_params);
+	fill_in_thread_Nfactor_params(opt_knc_threads_per_core, opt_scrypt_Nfactor, &setup_params);
 
 	repr = die_p->proc->device->dev_repr;
 	bool success = true;
@@ -368,7 +394,7 @@ static bool configure_one_die(struct knc_titan_info *knc, int asic, int die)
 static
 float titan_min_nonce_diff(struct cgpu_info * const proc, const struct mining_algorithm * const malgo)
 {
-	return (malgo->algo == POW_SCRYPT) ? DEFAULT_DIFF_FILTERING_FLOAT : -1.;
+	return (malgo->algo == POW_SCRYPT) ? DIFF_FILTERING_FLOAT(opt_scrypt_Nfactor) : -1.;
 }
 
 static bool knc_titan_init(struct thr_info * const thr)
@@ -510,7 +536,7 @@ static bool die_reconfigure(struct knc_titan_info * const knc, int asic, int die
 
 static bool knc_titan_prepare_work(struct thr_info *thr, struct work *work)
 {
-	work->nonce_diff = DEFAULT_DIFF_FILTERING_FLOAT;
+	work->nonce_diff = DIFF_FILTERING_FLOAT(opt_scrypt_Nfactor);
 	return true;
 }
 
@@ -620,8 +646,8 @@ static bool knc_titan_process_report(struct knc_titan_info * const knc, struct k
 			continue;
 		}
 		if (submit_nonce(proc->thr[0], work, report->nonce[i].nonce)) {
-			hashes_done2(proc->thr[0], DEFAULT_DIFF_HASHES_PER_NONCE, NULL);
-			knc_titan_die_hashmeter(knccore->die, DEFAULT_DIFF_HASHES_PER_NONCE);
+			hashes_done2(proc->thr[0], DIFF_HASHES_PER_NONCE(opt_scrypt_Nfactor), NULL);
+			knc_titan_die_hashmeter(knccore->die, DIFF_HASHES_PER_NONCE(opt_scrypt_Nfactor));
 			knccore->hwerr_in_row = 0;
 		}
 	}
