@@ -571,6 +571,26 @@ static void knc_titan_prune_local_queue(struct thr_info *thr)
 	knc_titan_set_queue_full(knc);
 }
 
+// http://www.concentric.net/~Ttwang/tech/inthash.htm
+static unsigned long mix(unsigned long a, unsigned long b, unsigned long c)
+{
+    a=a-b;  a=a-c;  a=a^(c >> 13);
+    b=b-c;  b=b-a;  b=b^(a << 8);
+    c=c-a;  c=c-b;  c=c^(b >> 13);
+    a=a-b;  a=a-c;  a=a^(c >> 12);
+    b=b-c;  b=b-a;  b=b^(a << 16);
+    c=c-a;  c=c-b;  c=c^(b >> 5);
+    a=a-b;  a=a-c;  a=a^(c >> 3);
+    b=b-c;  b=b-a;  b=b^(a << 10);
+    c=c-a;  c=c-b;  c=c^(b >> 15);
+    return c;
+}
+
+static int cmp_for_shuffling_works(const struct work * w1, const struct work * w2)
+{
+	return mix(w1->id, 0x9323774a, 0x145c5ea9) - mix(w2->id, 0x9323774a, 0x145c5ea9);
+}
+
 static bool knc_titan_queue_append(struct thr_info * const thr, struct work * const work)
 {
 	struct cgpu_info * const cgpu = thr->cgpu;
@@ -588,6 +608,11 @@ static bool knc_titan_queue_append(struct thr_info * const thr, struct work * co
 	knc_titan_set_queue_full(knc);
 	if (thr->queue_full)
 		knc_titan_prune_local_queue(thr);
+
+	if (pool_strategy == POOL_LOADBALANCE) {
+		/* Ensure more fair load-balancing by shuffling pseudo-randomly the queue */
+		DL_SORT(knc->workqueue, cmp_for_shuffling_works);
+	}
 
 	return true;
 }
