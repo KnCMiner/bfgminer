@@ -250,6 +250,26 @@ static int knc_transfer_completed(struct knc_state *knc, int stamp)
 	return (int)(knc->read_buffer_count - stamp) >= 1;
 }
 
+int knc_change_die_state(void* device_data, int asic_id, int die_id, bool enable)
+{
+	int ret = 0;
+	struct knc_state *knc = device_data;
+
+	applog(LOG_NOTICE, "KnC: %s die, ASIC id=%d, DIE id=%d", enable ? "enable" : "disable", asic_id, die_id);
+	mutex_lock(&knc->state_lock);
+
+	if (asic_id < 0 || asic_id >= KNC_MAX_ASICS || die_id < 0 || die_id >= KNC_MAX_DIES_PER_ASIC) {
+		ret = EINVAL;
+		goto out_unlock;
+	}
+
+ /* TODO : add actual processing of the commands */
+
+out_unlock:
+	mutex_unlock(&knc->state_lock);
+	return ret;
+}
+
 static bool knc_detect_one(void *ctx)
 {
 	/* Scan device for ASICs */

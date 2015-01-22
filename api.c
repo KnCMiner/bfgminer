@@ -38,6 +38,10 @@
 #include "driver-cpu.h" /* for algo_names[], TODO: re-factor dependency */
 #include "driver-opencl.h"
 
+#ifdef USE_KNCASIC
+#include "knc-asic/knc-asic.h"
+#endif
+
 #define HAVE_AN_FPGA 1
 
 // Max amount of data to buffer before sending on the socket
@@ -142,6 +146,10 @@ static const char *OSINFO =
 #define _DEBUGSET	"DEBUG"
 #define _SETCONFIG	"SETCONFIG"
 
+#ifdef USE_KNCASIC
+#define _KNC_DIE	"KNC_DIE"
+#endif
+
 static const char ISJSON = '{';
 #define JSON0		"{"
 #define JSON1		"\""
@@ -181,6 +189,10 @@ static const char ISJSON = '{';
 #define JSON_END	JSON4 JSON5
 #define JSON_END_TRUNCATED	JSON4_TRUNCATED JSON5
 #define JSON_BETWEEN_JOIN	","
+
+#ifdef USE_KNCASIC
+#define JSON_KNC_DIE	JSON1 _KNC_DIE JSON2
+#endif
 
 static const char *JSON_COMMAND = "command";
 static const char *JSON_PARAMETER = "parameter";
@@ -310,6 +322,14 @@ static const char *JSON_PARAMETER = "parameter";
 
 #define MSG_INVNEG 121
 #define MSG_SETQUOTA 122
+
+#ifdef USE_KNCASIC
+#define MSG_DIECHANGEOK 126
+#define MSG_DIECHANGEERR 127
+#define MSG_INVDIE 128
+#define MSG_DIEWRONGFORMAT 129
+#define MSG_INVASIC 130
+#endif /* USE_KNCASIC */
 
 #define USE_ALTMSG 0x4000
 
@@ -479,6 +499,15 @@ struct CODES {
  { SEVERITY_SUCC,  MSG_ZERNOSUM, PARAM_STR,	"Zeroed %s stats without summary" },
  { SEVERITY_SUCC,  MSG_DEVSCAN, PARAM_COUNT,	"Added %d new device(s)" },
  { SEVERITY_SUCC,  MSG_BYE,		PARAM_STR,	"%s" },
+#ifdef USE_KNCASIC
+#define xstr(s) _stringify_stage1_(s)
+#define _stringify_stage1_(s) #s
+ { SEVERITY_SUCC,  MSG_DIECHANGEOK,	PARAM_STR,	"Die was successfully %s" },
+ { SEVERITY_ERR,   MSG_DIECHANGEERR,	PARAM_NONE,	"Failed to change die state" },
+ { SEVERITY_ERR,   MSG_INVDIE,		PARAM_COUNT,	"Invalid DIE id %d: range is 0 <= id < " xstr(KNC_MAX_DIES_PER_ASIC) },
+ { SEVERITY_ERR,   MSG_DIEWRONGFORMAT,	PARAM_NONE,	"Wrong format. Format should be: ASIC=N;DIE=N;MODE:ENABLE;" },
+ { SEVERITY_ERR,   MSG_INVASIC,		PARAM_COUNT,	"Invalid ASIC id %d: range is 0 <= id < " xstr(KNC_MAX_ASICS) },
+#endif
  { SEVERITY_FAIL, 0, 0, NULL }
 };
 
@@ -3384,6 +3413,142 @@ static void dozero(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *p
 
 static void checkcommand(struct io_data *io_data, __maybe_unused SOCKETTYPE c, char *param, bool isjson, char group);
 
+#ifdef USE_KNCASIC
+int knc_change_die_state(void* device_data, int asic_id, int die_id, bool enable);
+
+static void knc_configure_die(struct io_data *io_data, __maybe_unused SOCKETTYPE c, __maybe_unused char *param, bool isjson, __maybe_unused char group)
+{
+	char buf[TMPBUFSIZ];
+
+	if (param == NULL || *param == '\0') {
+		message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+		return;
+	}
+
+	// command format: ASIC:N;DIE:N;MODE:ENABLE|DISABLE;
+	char *semi = NULL, *scolon = NULL;
+	int asic_id = -1, die_id = -1;
+	bool enable = false;
+
+	semi = strchr(param, ':'); // ASIC:N;
+	if (semi == NULL || *semi == '\0') {
+		message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+		return;
+	} else {
+		(*semi++) = '\0';
+		if (strcmp(param, "ASIC") != 0) {
+			message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+			return;
+		} else {
+			scolon = strchr(semi, ';');
+			if (scolon == NULL || *scolon == '\0') {
+				message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+				return;
+			}
+			(*scolon++) = 0;
+
+			asic_id = atoi(semi);
+			if (asic_id < 0 || asic_id >= KNC_MAX_ASICS) {
+				message(io_data, MSG_INVASIC, asic_id, NULL, isjson);
+				return;
+			}
+			param = scolon;
+		}
+	}
+
+	semi = strchr(param, ':'); // DIE:N;
+	if (semi == NULL && *semi == '\0') {
+		message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+		return;
+	} else {
+		(*semi++) = '\0';
+		if (strcmp(param, "DIE") != 0) {
+			message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+			return;
+		} else {
+			scolon = strchr(semi, ';');
+			if (scolon == NULL || *scolon == '\0') {
+				message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+				return;
+			}
+			(*scolon++) = 0;
+
+			die_id = atoi(semi);
+			if (die_id < 0 || die_id >= KNC_MAX_DIES_PER_ASIC) {
+				message(io_data, MSG_INVDIE, die_id, NULL, isjson);
+				return;
+			}
+			param = scolon;
+		}
+	}
+
+	semi = strchr(param, ':'); // MODE:{ENABLE|DISABLE};
+	if (semi == NULL && *semi == '\0') {
+		message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+		return;
+	} else {
+		(*semi++) = '\0';
+		if (strcmp(param, "MODE") != 0) {
+			message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+			return;
+		} else {
+			scolon = strchr(semi, ';');
+			if (scolon == NULL || *scolon == '\0') {
+				message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+				return;
+			}
+
+			(*scolon++) = 0;
+			if (strcmp(semi, "ENABLE") == 0) {
+				enable = true;
+			} else if (strcmp(semi, "DISABLE") == 0) {
+				enable = false;
+			} else {
+				message(io_data, MSG_DIEWRONGFORMAT, 0, NULL, isjson);
+				return;
+			}
+		}
+	}
+
+	int i;
+	struct thr_info *thr = NULL;
+	int ret;
+	struct api_data *root = NULL;
+	bool io_open;
+
+	for (i = 0; i < mining_threads; i++) {
+		thr = get_thread(i);
+		if (0 != strcmp(thr->cgpu->drv->dname, "kncasic"))
+			continue;
+
+		ret = knc_change_die_state(thr->cgpu->device_data, asic_id, die_id, enable);
+		if (ret != 0) {
+			message(io_data, MSG_DIECHANGEERR, 0, NULL, isjson);
+			return;
+		}
+
+		if (isjson)
+			io_open = io_add(io_data, COMSTR JSON_KNC_DIE);
+
+		root = api_add_int(root, _STATUS, &ret, false);
+		root = api_add_int(root, "ASIC", &asic_id, false);
+		root = api_add_int(root, "DIE", &die_id, false);
+		root = api_add_bool(root, "MODE", &enable, false);
+		print_data(root, buf, isjson, false);
+		io_add(io_data, buf);
+		break;
+	}
+
+	if (root)
+		message(io_data, MSG_DIECHANGEOK, 0, enable ? "enabled": "disabled", isjson);
+	else
+		message(io_data, MSG_DIECHANGEERR, 0, NULL, isjson);
+
+	if (isjson && io_open)
+		io_close(io_data);
+}
+#endif /* USE_KNCASIC */
+
 struct CMDS {
 	char *name;
 	void (*func)(struct io_data *, SOCKETTYPE, char *, bool, char);
@@ -3457,6 +3622,9 @@ struct CMDS {
 	{ "procset",		pgaset,		true,	false },
 #endif
 	{ "zero",		dozero,		true,	false },
+#ifdef USE_KNCASIC
+	{ "knc-configure-die",	knc_configure_die,	true,	true },
+#endif
 	{ NULL,			NULL,		false,	false }
 };
 
