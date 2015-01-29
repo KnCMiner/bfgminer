@@ -751,7 +751,7 @@ static void knc_process_responses(struct thr_info *thr)
 			if (response_info->type == KNC_SETWORK && !KNC_IS_ERROR(status))
 				status ^= KNC_ACCEPTED;
 			if (core->die->version != KNC_VERSION_JUPITER && status != 0) {
-				applog(LOG_ERR, "%"PRIpreprv"[%d]: Communication error (%x / %d)", proc->proc_repr, core->core, status, i);
+				applog(LOG_INFO, "%"PRIpreprv"[%d]: Communication error (%x / %d)", proc->proc_repr, core->core, status, i);
 				if (status == KNC_ACCEPTED) {
 					/* Core refused our work vector. Likely out of sync. Reset it */
 					core->inuse = false;
@@ -908,7 +908,7 @@ static int64_t knc_scanwork(struct thr_info *thr)
 			core->hold_work_until = now;
 			core->generation = knc->generation;
 		} else if (timercmp(&core->timeout, &now, <=) && (core->workslot[0].slot > 0 || core->workslot[1].slot > 0 || core->workslot[2].slot > 0)) {
-			applog(LOG_ERR, "%"PRIpreprv"[%d] timeout gen=%d/%d", proc->proc_repr, core->core, core->generation, knc->generation);
+			applog(LOG_INFO, "%"PRIpreprv"[%d] timeout gen=%d/%d", proc->proc_repr, core->core, core->generation, knc->generation);
 			clean = true;
 		}
 		if (!knc_core_has_work(core))
