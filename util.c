@@ -2584,7 +2584,7 @@ static bool parse_notify(struct pool *pool, json_t *val)
 		pool->swork.tr = NULL;
 	}
 	pool->submit_old = !clean;
-	pool->swork.clean = true;
+	pool->swork.clean = clean;
 	
 	// stratum_set_goal ensures these are the same pointer if they match
 	if (pool->goalname != pool->next_goalname)
