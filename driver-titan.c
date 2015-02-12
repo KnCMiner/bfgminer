@@ -807,11 +807,11 @@ static void knc_titan_poll(struct thr_info * const thr)
 									work_updated = true;
 									nomore_work_updates = true;
 								}
-							} else {
-								/* Non-urgent broadcast, just chekcing if some cores are ready for a new work */
-								if (!knc_titan_set_work(die_proc->dev_repr, knc->ctx, asic, die, ALL_CORES, die_p->next_slot, work, false, &work_accepted, &report))
-									work_accepted = false;
 							}
+						} else {
+							/* Non-urgent broadcast, just chekcing if some cores are ready for a new work */
+							if (!knc_titan_set_work(die_proc->dev_repr, knc->ctx, asic, die, ALL_CORES, die_p->next_slot, work, false, &work_accepted, &report))
+								work_accepted = false;
 						}
 					}
 				}
