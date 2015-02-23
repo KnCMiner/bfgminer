@@ -695,12 +695,25 @@ static bool knc_titan_process_report(struct knc_titan_info * const knc, struct k
 	return ret;
 }
 
+static void knc_titan_check_stale_devicework_queue(struct knc_titan_info * const knc)
+{
+	struct work *work, *tmp;
+	HASH_ITER(hh, knc->devicework, work, tmp) {
+		if (stale_work(work, false)) {
+			unsigned int asic = ASIC_FROM_WORKID(work->device_id);
+			unsigned int die = DIE_FROM_WORKID(work->device_id);
+			if (likely((asic < KNC_TITAN_MAX_ASICS) && (die < KNC_TITAN_DIES_PER_ASIC)))
+				knc->dies[asic][die].work_update = true;
+		}
+	}
+}
+
 static void knc_titan_poll(struct thr_info * const thr)
 {
 	struct cgpu_info * const cgpu = thr->cgpu;
 	struct knc_titan_info * const knc = cgpu->device_data;
 	struct knc_titan_core *knccore;
-	struct work *work, *tmp;
+	struct work *work, *tmp, *work1, *tmp1;
 	int workaccept = 0;
 	unsigned long delay_usecs = KNC_POLL_INTERVAL_US;
 	struct knc_report report;
@@ -713,7 +726,13 @@ static void knc_titan_poll(struct thr_info * const thr)
 	int num_status_byte_error[4];
 	bool fpga_status_checked;
 
-	knc_titan_prune_local_queue(thr);
+	if (unlikely(thr->work_restart)) {
+		thr->work_restart = false;
+		knc_titan_queue_flush(thr);
+	} else {
+		knc_titan_prune_local_queue(thr);
+		knc_titan_check_stale_devicework_queue(knc);
+	}
 
 	/* Process API requests */
 	for (asic = 0; asic < KNC_TITAN_MAX_ASICS; ++asic) {
@@ -827,11 +846,20 @@ static void knc_titan_poll(struct thr_info * const thr)
 					die_p->first_slot = die_p->next_slot;
 					delay_usecs = 0;
 					was_flushed = true;
+					if (work_updated) {
+						/* We've already collected all old results form all cores, unlike FPGA-assisted flush,
+						 * so it is absolutely ok to clean all old works for this die */
+						HASH_ITER(hh, knc->devicework, work1, tmp1) {
+							if ((asic == ASIC_FROM_WORKID(work1->device_id)) & (die == DIE_FROM_WORKID(work1->device_id))) {
+								HASH_DEL(knc->devicework, work1);
+								free_work(work1);
+							}
+						}
+					}
 				}
 				--knc->workqueue_size;
 				DL_DELETE(knc->workqueue, work);
 				work->device_id = MAKE_WORKID(asic, die, die_p->next_slot);
-				struct work *work1, *tmp1;
 				HASH_ITER(hh, knc->devicework, work1, tmp1) {
 					if (work->device_id == work1->device_id) {
 						HASH_DEL(knc->devicework, work1);
