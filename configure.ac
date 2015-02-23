@@ -14,7 +14,7 @@ dnl * any later version.  See COPYING for more details.
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_maj], [5])
-m4_define([v_min], [0])
+m4_define([v_min], [1])
 m4_define([v_mic], [0])
 ##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##--##
 m4_define([v_ver], [v_maj.v_min.v_mic])
@@ -269,7 +269,7 @@ m4_define([_BFG_AUTOITEM],[
 		fi
 		if test "x$[]_this_USE" != xyes; then
 			if test "x$[]_this_USE" != xauto; then
-				$1_opt="$[]_this_USE"
+				[]_this_drv[]_opt="$[]_this_USE"
 			fi
 			[]_this_USE=yes
 		fi
