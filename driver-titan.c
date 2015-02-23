@@ -97,6 +97,7 @@ struct knc_titan_die {
 	struct knc_titan_core *first_core;
 
 	bool need_flush;
+	bool work_update;
 	int next_slot;
 	/* First slot after flush. If next_slot reaches this, then
 	 * we need to re-flush all the cores to avoid duplicating slot numbers
@@ -625,6 +626,7 @@ static void knc_titan_queue_flush(struct thr_info * const thr)
 	struct cgpu_info * const cgpu = thr->cgpu;
 	struct knc_titan_info * const knc = cgpu->device_data;
 	struct work *work, *tmp;
+	int asic, die;
 
 	if (knc->cgpu != cgpu)
 		return;
@@ -635,15 +637,25 @@ static void knc_titan_queue_flush(struct thr_info * const thr)
 	knc_titan_set_queue_full(knc);
 
 	HASH_LAST_ADDED(knc->devicework, work);
-	if (work && stale_work(work, true)) {
-		int asic, die;
-		for (asic = 0; asic < KNC_TITAN_MAX_ASICS; ++asic) {
-			for (die = 0; die < KNC_TITAN_DIES_PER_ASIC; ++die) {
-				knc->dies[asic][die].need_flush = true;
+	if (work) {
+		if (stale_work(work, true)) {
+			/* pool requested to clean old works */
+			for (asic = 0; asic < KNC_TITAN_MAX_ASICS; ++asic) {
+				for (die = 0; die < KNC_TITAN_DIES_PER_ASIC; ++die) {
+					knc->dies[asic][die].need_flush = true;
+				}
+				knc->asic_served_by_fpga[asic] = true;
 			}
-			knc->asic_served_by_fpga[asic] = true;
+			timer_set_now(&thr->tv_poll);
+		} else if (stale_work(work, false)) {
+			/* pool asked to update works, but not urgently */
+			for (asic = 0; asic < KNC_TITAN_MAX_ASICS; ++asic) {
+				for (die = 0; die < KNC_TITAN_DIES_PER_ASIC; ++die) {
+					knc->dies[asic][die].work_update = true;
+				}
+			}
+			timer_set_now(&thr->tv_poll);
 		}
-		timer_set_now(&thr->tv_poll);
 	}
 }
 
@@ -683,12 +695,25 @@ static bool knc_titan_process_report(struct knc_titan_info * const knc, struct k
 	return ret;
 }
 
+static void knc_titan_check_stale_devicework_queue(struct knc_titan_info * const knc)
+{
+	struct work *work, *tmp;
+	HASH_ITER(hh, knc->devicework, work, tmp) {
+		if (stale_work(work, false)) {
+			unsigned int asic = ASIC_FROM_WORKID(work->device_id);
+			unsigned int die = DIE_FROM_WORKID(work->device_id);
+			if (likely((asic < KNC_TITAN_MAX_ASICS) && (die < KNC_TITAN_DIES_PER_ASIC)))
+				knc->dies[asic][die].work_update = true;
+		}
+	}
+}
+
 static void knc_titan_poll(struct thr_info * const thr)
 {
 	struct cgpu_info * const cgpu = thr->cgpu;
 	struct knc_titan_info * const knc = cgpu->device_data;
 	struct knc_titan_core *knccore;
-	struct work *work, *tmp;
+	struct work *work, *tmp, *work1, *tmp1;
 	int workaccept = 0;
 	unsigned long delay_usecs = KNC_POLL_INTERVAL_US;
 	struct knc_report report;
@@ -701,7 +726,13 @@ static void knc_titan_poll(struct thr_info * const thr)
 	int num_status_byte_error[4];
 	bool fpga_status_checked;
 
-	knc_titan_prune_local_queue(thr);
+	if (unlikely(thr->work_restart)) {
+		thr->work_restart = false;
+		knc_titan_queue_flush(thr);
+	} else {
+		knc_titan_prune_local_queue(thr);
+		knc_titan_check_stale_devicework_queue(knc);
+	}
 
 	/* Process API requests */
 	for (asic = 0; asic < KNC_TITAN_MAX_ASICS; ++asic) {
@@ -721,6 +752,7 @@ static void knc_titan_poll(struct thr_info * const thr)
 	}
 
 	/* Send new works */
+	bool nomore_work_updates = false;
 	for (asic = 0; asic < KNC_TITAN_MAX_ASICS; ++asic) {
                 fpga_status_checked = false;
                 num_request_busy = KNC_TITAN_DIES_PER_ASIC;
@@ -734,6 +766,7 @@ static void knc_titan_poll(struct thr_info * const thr)
 			DL_FOREACH_SAFE(knc->workqueue, work, tmp) {
 				bool work_accepted = false;
 				bool need_replace;
+				bool work_updated = false;
 				if (die_p->first_slot > KNC_TITAN_MIN_WORK_SLOT_NUM)
 					need_replace = ((die_p->next_slot + 1) == die_p->first_slot);
 				else
@@ -775,25 +808,58 @@ static void knc_titan_poll(struct thr_info * const thr)
 							}
 						}
 					}
-					if (knc->asic_served_by_fpga[asic] || !knc_titan_set_work(die_proc->dev_repr, knc->ctx, asic, die, ALL_CORES, die_p->next_slot, work, false, &work_accepted, &report))
-						work_accepted = false;
+					if (!knc->asic_served_by_fpga[asic]) {
+						if (die_p->work_update && !nomore_work_updates) {
+							/* Pool asked to update work, but not requested immediate flush, so do it in controlled way */
+							bool work_acc_arr[die_p->cores];
+							struct knc_report reports[die_p->cores];
+							for (knccore = die_p->first_core ; knccore ; knccore = knccore->next_core) {
+								work_acc_arr[knccore->coreno] = false;
+							}
+							if (knc_titan_set_work_multi(die_proc->dev_repr, knc->ctx, asic, die, 0, die_p->next_slot, work, true, work_acc_arr, reports, die_p->cores)) {
+								for (knccore = die_p->first_core ; knccore ; knccore = knccore->next_core) {
+									if (work_acc_arr[knccore->coreno]) {
+										if (knc_titan_process_report(knc, knccore, &(reports[knccore->coreno])))
+											timer_set_now(&(die_p->last_share));
+										work_accepted = true;
+									}
+									work_updated = true;
+									nomore_work_updates = true;
+								}
+							}
+						} else {
+							/* Non-urgent broadcast, just chekcing if some cores are ready for a new work */
+							if (!knc_titan_set_work(die_proc->dev_repr, knc->ctx, asic, die, ALL_CORES, die_p->next_slot, work, false, &work_accepted, &report))
+								work_accepted = false;
+						}
+					}
 				}
 				knccore = die_proc->thr[0]->cgpu_data;
 				if ((!work_accepted) || (NULL == knccore))
 					break;
 				bool was_flushed = false;
-				if (die_p->need_flush || need_replace) {
-					applog(LOG_DEBUG, "%s[%d-%d] Flushing stale works (%s)", die_proc->dev_repr, asic, die,
-					       die_p->need_flush ? "New work" : "Slot collision");
+				if (die_p->need_flush || need_replace || work_updated) {
+					applog(LOG_INFO, "%s[%d-%d] Flushing stale works (%s)", die_proc->dev_repr, asic, die,
+					       die_p->need_flush ? "Clean work" : (need_replace ? "Slot collision" : "Update work"));
 					die_p->need_flush = false;
+					die_p->work_update = false;
 					die_p->first_slot = die_p->next_slot;
 					delay_usecs = 0;
 					was_flushed = true;
+					if (work_updated) {
+						/* We've already collected all old results form all cores, unlike FPGA-assisted flush,
+						 * so it is absolutely ok to clean all old works for this die */
+						HASH_ITER(hh, knc->devicework, work1, tmp1) {
+							if ((asic == ASIC_FROM_WORKID(work1->device_id)) & (die == DIE_FROM_WORKID(work1->device_id))) {
+								HASH_DEL(knc->devicework, work1);
+								free_work(work1);
+							}
+						}
+					}
 				}
 				--knc->workqueue_size;
 				DL_DELETE(knc->workqueue, work);
 				work->device_id = MAKE_WORKID(asic, die, die_p->next_slot);
-				struct work *work1, *tmp1;
 				HASH_ITER(hh, knc->devicework, work1, tmp1) {
 					if (work->device_id == work1->device_id) {
 						HASH_DEL(knc->devicework, work1);
