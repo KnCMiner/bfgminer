@@ -764,6 +764,12 @@ static void knc_titan_poll(struct thr_info * const thr)
 				continue;
 			struct cgpu_info *die_proc = die_p->proc;
 			DL_FOREACH_SAFE(knc->workqueue, work, tmp) {
+				if (stale_work(work, false)) {
+					--knc->workqueue_size;
+					DL_DELETE(knc->workqueue, work);
+					free_work(work);
+					continue;
+				}
 				bool work_accepted = false;
 				bool need_replace;
 				bool work_updated = false;
