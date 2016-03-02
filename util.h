@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2014 Luke Dashjr
+ * Copyright 2013-2015 Luke Dashjr
  * Copyright 2012-2014 Con Kolivas
  * Copyright 2011 Andrew Smith
  * Copyright 2011 Jeff Garzik
@@ -466,7 +466,7 @@ void pk_u64le(void * const bufp, const int offset, const uint64_t nv)
 }while(0)
 
 #define is_power_of_two(n)  \
-	(0 == ((n) && ((n) - 1)))
+	(0 == ((n) & ((n) - 1)))
 
 static inline
 uint32_t upper_power_of_two_u32(uint32_t n)
@@ -724,6 +724,15 @@ int timer_elapsed(const struct timeval *tvp_timer, const struct timeval *tvp_now
 }
 
 static inline
+long timer_remaining_us(const struct timeval *tvp_timer, const struct timeval *tvp_now)
+{
+	struct timeval tv;
+	const struct timeval *_tvp_now = _bfg_nullisnow(tvp_now, &tv);
+	timersub(tvp_timer, _tvp_now, &tv);
+	return timeval_to_us(&tv);
+}
+
+static inline
 bool timer_passed(const struct timeval *tvp_timer, const struct timeval *tvp_now)
 {
 	if (!timer_isset(tvp_timer))
@@ -819,6 +828,9 @@ extern char *trimmed_strdup(const char *);
 
 
 extern void run_cmd(const char *cmd);
+
+
+extern bool bm1382_freq_to_reg_data(uint8_t *out_reg_data, float mhz);
 
 
 extern uint8_t crc5usb(unsigned char *ptr, uint8_t len);

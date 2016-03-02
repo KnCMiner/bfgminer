@@ -26,6 +26,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <utlist.h>
+
 #include "compat.h"
 #include "deviceapi.h"
 #include "logging.h"
@@ -41,21 +43,17 @@ struct driver_registration *_bfg_drvreg2;
 
 void _bfg_register_driver(const struct device_drv *drv)
 {
-	static struct driver_registration *initlist;
 	struct driver_registration *ndr;
 	
 	if (!drv)
 	{
-		// Move initlist to hashtables
-		LL_FOREACH(initlist, ndr)
+		// NOTE: Not sorted at this point (dname and priority may be unassigned until drv_init!)
+		LL_FOREACH2(_bfg_drvreg1, ndr, next_dname)
 		{
 			drv = ndr->drv;
 			if (drv->drv_init)
 				drv->drv_init();
-			HASH_ADD_KEYPTR(hh , _bfg_drvreg1, drv->dname, strlen(drv->dname), ndr);
-			HASH_ADD_KEYPTR(hh2, _bfg_drvreg2, drv->name , strlen(drv->name ), ndr);
 		}
-		initlist = NULL;
 		return;
 	}
 	
@@ -63,7 +61,8 @@ void _bfg_register_driver(const struct device_drv *drv)
 	*ndr = (struct driver_registration){
 		.drv = drv,
 	};
-	LL_PREPEND(initlist, ndr);
+	LL_PREPEND2(_bfg_drvreg1, ndr, next_dname);
+	LL_PREPEND2(_bfg_drvreg2, ndr, next_prio);
 }
 
 static
@@ -81,8 +80,17 @@ int sort_drv_by_priority(struct driver_registration * const a, struct driver_reg
 void bfg_devapi_init()
 {
 	_bfg_register_driver(NULL);
-	HASH_SRT(hh , _bfg_drvreg1, sort_drv_by_dname   );
-	HASH_SRT(hh2, _bfg_drvreg2, sort_drv_by_priority);
+#ifdef LL_SORT2
+	LL_SORT2(_bfg_drvreg1, sort_drv_by_dname, next_dname);
+	LL_SORT2(_bfg_drvreg2, sort_drv_by_priority, next_prio);
+#else
+	#define next next_dname
+	LL_SORT(_bfg_drvreg1, sort_drv_by_dname);
+	#undef next
+	#define next next_prio
+	LL_SORT(_bfg_drvreg2, sort_drv_by_priority);
+	#undef next
+#endif
 }
 
 
@@ -887,7 +895,7 @@ nohelp:
 	
 	size_t matchlen = 0;
 	if (newvalue)
-		while (!isspace(newvalue[0]))
+		while (newvalue[matchlen] && !isspace(newvalue[matchlen]))
 			++matchlen;
 	
 	for ( ; sdf->optname; ++sdf)
@@ -935,6 +943,7 @@ void _set_auto_sdr(enum bfg_set_device_replytype * const out_success, const char
 		*out_success = SDR_ERR;
 }
 
+static
 const char *_proc_set_device(struct cgpu_info * const proc, const char * const optname, const char * const newvalue, char * const replybuf, enum bfg_set_device_replytype * const out_success)
 {
 	const struct bfg_set_device_definition *sdf;
@@ -963,6 +972,7 @@ const char *_proc_set_device(struct cgpu_info * const proc, const char * const o
 	return replybuf;
 }
 
+static
 const char *__proc_set_device(struct cgpu_info * const proc, char * const optname, char * const newvalue, char * const replybuf, enum bfg_set_device_replytype * const out_success)
 {
 	if (proc->drv->set_device)
@@ -975,8 +985,10 @@ const char *__proc_set_device(struct cgpu_info * const proc, char * const optnam
 	return _proc_set_device(proc, optname, newvalue, replybuf, out_success);
 }
 
-const char *proc_set_device(struct cgpu_info * const proc, char * const optname, char * const newvalue, char * const replybuf, enum bfg_set_device_replytype * const out_success)
+const char *proc_set_device(struct cgpu_info * const proc, char * const optname, char *newvalue, char * const replybuf, enum bfg_set_device_replytype * const out_success)
 {
+	if (!newvalue)
+		newvalue = "";
 	const char * const rv = __proc_set_device(proc, optname, newvalue, replybuf, out_success);
 	switch (*out_success)
 	{
@@ -992,6 +1004,31 @@ const char *proc_set_device(struct cgpu_info * const proc, char * const optname,
 	}
 	return rv;
 }
+
+#ifdef HAVE_CURSES
+const char *proc_set_device_tui_wrapper(struct cgpu_info * const proc, char * const optname, const bfg_set_device_func_t func, const char * const prompt, const char * const success_msg)
+{
+	static char replybuf[0x2001];
+	char * const cvar = curses_input(prompt);
+	if (!cvar)
+		return "Cancelled\n";
+	
+	enum bfg_set_device_replytype success;
+	const char * const reply = func(proc, optname, cvar, replybuf, &success);
+	free(cvar);
+	
+	if (reply)
+	{
+		if (reply != replybuf)
+			snprintf(replybuf, sizeof(replybuf), "%s\n", reply);
+		else
+			tailsprintf(replybuf, sizeof(replybuf), "\n");
+		return replybuf;
+	}
+	
+	return success_msg ?: "Successful\n";
+}
+#endif
 
 #ifdef NEED_BFG_LOWL_VCOM
 bool _serial_detect_all(struct lowlevel_device_info * const info, void * const userp)
