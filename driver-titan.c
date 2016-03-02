@@ -156,6 +156,19 @@ static void knc_titan_zero_stats(struct cgpu_info *cgpu)
 	}
 }
 
+static struct api_data *knc_titan_extra_die_status(struct cgpu_info *device)
+{
+	struct api_data *root = NULL;
+	struct knc_titan_die *die = device->thr[0]->cgpu_data;
+	int asicno = die->asicno + 1;
+	int dieno = die->dieno + 1;
+
+	root = api_add_int(root, "ASIC", &asicno, 1);
+	root = api_add_int(root, "DIE", &dieno, 1);
+
+	return root;
+}
+
 static double knc_titan_get_die_rolling_hashrate(struct cgpu_info *device)
 {
 	struct knc_titan_die *die = device->thr[0]->cgpu_data;
@@ -1070,6 +1083,7 @@ struct device_drv knc_titan_drv =
 	/* additional statistics */
 	.get_proc_rolling_hashrate = knc_titan_get_die_rolling_hashrate,
 	.zero_stats = knc_titan_zero_stats,
+	.get_api_extra_device_status = knc_titan_extra_die_status,
 
 	/* TUI support - e.g. setting clock via UI */
 #ifdef HAVE_CURSES
